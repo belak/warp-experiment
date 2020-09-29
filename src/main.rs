@@ -14,31 +14,31 @@ struct User {
 }
 
 fn auth_filter() -> impl Filter<Extract = (User,), Error = Rejection> + Clone {
-    let auth_header = warp::header("authorization").and_then(|header: String| async move {
-        let mut split = header.splitn(2, ' ');
-        match (split.next(), split.next()) {
-            (Some("Bearer"), Some(token)) => Ok(Auth {
-                token: Some(token.to_string()),
-            }),
-            (Some(_), Some(_)) => Err(errors::auth_token("invalid scheme")),
-            (_, _) => Err(errors::auth_token("missing token")),
-        }
-    });
+    warp::header::optional("authorization")
+        .and(warp::query::<Auth>())
+        .and_then(|header: Option<String>, query: Auth| async move {
+            let token = match (header.as_ref(), &query.token) {
+                (Some(header), None) => {
+                    let mut split = header.splitn(2, ' ');
+                    match (split.next(), split.next()) {
+                        (Some("Bearer"), Some(token)) => token,
+                        (Some(_), Some(_)) => return Err(errors::auth_token("invalid scheme")),
+                        (_, _) => return Err(errors::auth_token("missing token")),
+                    }
+                }
+                (None, Some(token)) => token.as_str(),
+                (Some(_), Some(_)) => return Err(errors::auth_token("multiple tokens specified")),
+                (None, None) => return Err(errors::auth_token("no token specified")),
+            };
 
-    let auth_query = warp::query::<Auth>();
-
-    auth_header
-        .or(auth_query)
-        .unify()
-        .and_then(|auth: Auth| async move {
-            match auth.token {
-                Some(_token) => Ok(User {
-                    name: "belak".to_string(),
-                }),
-                None => Err(errors::unauthorized()),
+            if token != "hello world" {
+                return Err(errors::unauthorized());
             }
+
+            Ok(User {
+                name: "belak".to_string(),
+            })
         })
-        .recover(errors::handle_rejection)
 }
 
 fn display_user(user: User) -> impl warp::Reply {
